@@ -48,7 +48,7 @@
                     filters: [
                         { namePrefix: 'M5StickC' }
                     ],
-                    optionalServices: ['battery_service'] // ダミーサービス
+                    // optionalServices は完全に削除
                 });
                 const server = await device.gatt.connect();
                 const services = await server.getPrimaryServices();
