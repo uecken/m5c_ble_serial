@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M5StickC IMU Data</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        canvas {
+            max-width: 800px;
+            margin: 20px auto;
+        }
+        #allData {
+            max-height: 200px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>M5StickC IMU Data</h1>
+    <button id="connect">Connect to M5StickC</button>
+    <div id="status"></div>
+    <div id="data"></div>
+    <canvas id="accChart"></canvas>
+    <canvas id="gyroChart"></canvas>
+    <div id="allData"></div>
+    <button id="download" disabled>Download Data</button>
+    <button id="sendToSheet" disabled>Send to Google Sheet</button>
+
+    <script>
+        let characteristic;
+        let accChart, gyroChart;
+        const dataPoints = 50;
+        const accData = [[], [], []];
+        const gyroData = [[], [], []];
+        let allData = [];
+
+        document.getElementById('connect').addEventListener('click', connectBLE);
+        document.getElementById('download').addEventListener('click', downloadData);
+        document.getElementById('sendToSheet').addEventListener('click', sendToGoogleSheet);
+
+        function connectBLE() {
+            navigator.bluetooth.requestDevice({
+                filters: [{ name: 'M5StickC_IMU' }],
+                optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+            })
+            .then(device => device.gatt.connect())
+            .then(server => server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b'))
+            .then(service => service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8'))
+            .then(char => {
+                characteristic = char;
+                return characteristic.startNotifications();
+            })
+            .then(_ => {
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
+                document.getElementById('status').textContent = 'Connected to M5StickC';
+            })
+            .catch(error => {
+                console.error(error);
+                document.getElementById('status').textContent = 'Connection failed: ' + error;
+            });
+        }
+
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            document.getElementById('data').textContent = value;
+            allData.push(value);
+            updateAllDataDisplay();
+
+            const [accPart, gyroPart] = value.split(' ');
+            const [ax, ay, az] = accPart.split(':')[1].split(',').map(Number);
+            const [gx, gy, gz] = gyroPart.split(':')[1].split(',').map(Number);
+
+            updateChart(accChart, accData, [ax, ay, az]);
+            updateChart(gyroChart, gyroData, [gx, gy, gz]);
+
+            document.getElementById('download').disabled = false;
+            document.getElementById('sendToSheet').disabled = false;
+        }
+
+        function updateChart(chart, data, newValues) {
+            newValues.forEach((value, index) => {
+                data[index].push(value);
+                if (data[index].length > dataPoints) {
+                    data[index].shift();
+                }
+            });
+            chart.data.datasets.forEach((dataset, i) => {
+                dataset.data = data[i];
+            });
+            chart.update();
+        }
+
+        function createChart(ctx, label) {
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [...Array(dataPoints)].map((_, i) => i),
+                    datasets: [
+                        { label: label + 'X', data: [], borderColor: 'red', fill: false },
+                        { label: label + 'Y', data: [], borderColor: 'green', fill: false },
+                        { label: label + 'Z', data: [], borderColor: 'blue', fill: false }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Time' } },
+                        y: { title: { display: true, text: label } }
+                    }
+                }
+            });
+        }
+
+        function updateAllDataDisplay() {
+            const allDataDiv = document.getElementById('allData');
+            allDataDiv.innerHTML = allData.join('<br>');
+            allDataDiv.scrollTop = allDataDiv.scrollHeight;
+        }
+
+        function downloadData() {
+            const blob = new Blob([allData.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'imu_data.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function sendToGoogleSheet() {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const sheetName = `IMU_Data_${timestamp}`;
+            const data = allData.join('\n');
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'https://script.google.com/macros/s/AKfycbygm3t2i2tzwxjx-HUU9Kh_7UyicfWKtHjuWccaBYar7v9oROSuaQYiSPbCiZqzjbMI/exec';
+            form.target = 'hidden_iframe';
+
+            const sheetNameInput = document.createElement('input');
+            sheetNameInput.type = 'hidden';
+            sheetNameInput.name = 'sheetName';
+            sheetNameInput.value = sheetName;
+            form.appendChild(sheetNameInput);
+
+            const dataInput = document.createElement('input');
+            dataInput.type = 'hidden';
+            dataInput.name = 'data';
+            dataInput.value = data;
+            form.appendChild(dataInput);
+
+            document.body.appendChild(form);
+
+            const iframe = document.createElement('iframe');
+            iframe.name = 'hidden_iframe';
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+
+            form.submit();
+
+            alert(`Data sent to Google Sheet. New sheet "${sheetName}" has been created.`);
+
+            // フォームとiframeを削除
+            setTimeout(() => {
+                document.body.removeChild(form);
+                document.body.removeChild(iframe);
+            }, 1000);
+        }
+
+        accChart = createChart(document.getElementById('accChart').getContext('2d'), 'Acceleration');
+        gyroChart = createChart(document.getElementById('gyroChart').getContext('2d'), 'Gyroscope');
+    </script>
+</body>
+</html>

@@ -28,6 +28,7 @@
     <canvas id="gyroChart"></canvas>
     <div id="allData"></div>
     <button id="download" disabled>Download Data</button>
+    <button id="sendToSheet" disabled>Send to Google Sheet</button>
 
     <script>
         let characteristic;
@@ -39,6 +40,7 @@
 
         document.getElementById('connect').addEventListener('click', connectBLE);
         document.getElementById('download').addEventListener('click', downloadData);
+        document.getElementById('sendToSheet').addEventListener('click', sendToGoogleSheet);
 
         function connectBLE() {
             navigator.bluetooth.requestDevice({
@@ -76,6 +78,7 @@
             updateChart(gyroChart, gyroData, [gx, gy, gz]);
 
             document.getElementById('download').disabled = false;
+            document.getElementById('sendToSheet').disabled = false;
         }
 
         function updateChart(chart, data, newValues) {
@@ -128,6 +131,46 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        async function sendToGoogleSheet() {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const sheetName = `IMU_Data_${timestamp}`;
+            const data = allData.join('\n');
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'https://script.google.com/macros/s/AKfycbygm3t2i2tzwxjx-HUU9Kh_7UyicfWKtHjuWccaBYar7v9oROSuaQYiSPbCiZqzjbMI/exec';
+            form.target = 'hidden_iframe';
+
+            const sheetNameInput = document.createElement('input');
+            sheetNameInput.type = 'hidden';
+            sheetNameInput.name = 'sheetName';
+            sheetNameInput.value = sheetName;
+            form.appendChild(sheetNameInput);
+
+            const dataInput = document.createElement('input');
+            dataInput.type = 'hidden';
+            dataInput.name = 'data';
+            dataInput.value = data;
+            form.appendChild(dataInput);
+
+            document.body.appendChild(form);
+
+            const iframe = document.createElement('iframe');
+            iframe.name = 'hidden_iframe';
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+
+            form.submit();
+
+            alert(`Data sent to Google Sheet. New sheet "${sheetName}" has been created.`);
+
+            // フォームとiframeを削除
+            setTimeout(() => {
+                document.body.removeChild(form);
+                document.body.removeChild(iframe);
+            }, 1000);
         }
 
         accChart = createChart(document.getElementById('accChart').getContext('2d'), 'Acceleration');
